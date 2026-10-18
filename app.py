@@ -6,6 +6,7 @@ import pandas as pd
 import streamlit as st
 from google import genai
 from google.genai import types
+from pypdf import PdfReader
 
 
 # --------------------------------------------------
@@ -228,6 +229,29 @@ transcript = st.text_area(
     ),
 )
 
+uploaded_files = st.file_uploader(
+    "Or upload meeting transcript files (.txt or .pdf)",
+    type=["txt", "pdf"],
+    accept_multiple_files=True,
+    help="You can upload one or more text or PDF files.",
+)
+
+
+def extract_uploaded_file_text(uploaded_file):
+    """Read text from an uploaded TXT or text-based PDF file."""
+    if uploaded_file.name.lower().endswith(".txt"):
+        return uploaded_file.getvalue().decode("utf-8", errors="replace")
+
+    if uploaded_file.name.lower().endswith(".pdf"):
+        pdf_reader = PdfReader(uploaded_file)
+        pages_text = []
+        for page in pdf_reader.pages:
+            pages_text.append(page.extract_text() or "")
+        return "\n".join(pages_text)
+
+    return ""
+
+
 analyze_button = st.button(
     "🚀 Analyze Meeting",
     type="primary",
@@ -242,8 +266,31 @@ analyze_button = st.button(
 if analyze_button:
     api_key = get_api_key()
 
-    if not transcript.strip():
-        st.warning("Please enter a meeting transcript.")
+    uploaded_text_parts = []
+    if uploaded_files:
+        for uploaded_file in uploaded_files:
+            try:
+                file_text = extract_uploaded_file_text(uploaded_file).strip()
+                if file_text:
+                    uploaded_text_parts.append(
+                        f"\n--- Content from {uploaded_file.name} ---\n{file_text}"
+                    )
+                else:
+                    st.warning(
+                        f"No readable text was found in {uploaded_file.name}. "
+                        "Scanned/image-only PDFs may require OCR."
+                    )
+            except Exception as file_error:
+                st.error(f"Could not read {uploaded_file.name}: {file_error}")
+
+    combined_transcript = transcript.strip()
+    if uploaded_text_parts:
+        combined_transcript = "\n\n".join(
+            part for part in [combined_transcript, *uploaded_text_parts] if part
+        )
+
+    if not combined_transcript:
+        st.warning("Please enter a meeting transcript or upload a TXT/PDF file.")
 
     elif not api_key:
         st.error(
@@ -258,7 +305,7 @@ if analyze_button:
         try:
             with st.spinner("AI is analyzing your meeting..."):
                 result = analyze_meeting(
-                    transcript.strip(),
+                    combined_transcript,
                     model_name.strip(),
                     api_key,
                 )
